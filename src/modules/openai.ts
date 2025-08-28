@@ -1,8 +1,11 @@
 import { config } from '../config';
 import OpenAI from "openai";
+import type { ChatCompletionCreateParams } from 'openai/resources/chat/completions';
 import moment from 'moment-timezone';
 import fs from 'fs'
 import path from 'path'
+
+type OpenAIModel = ChatCompletionCreateParams['model'];
 
 // Definición de tipos
 interface Tool {
@@ -28,7 +31,7 @@ class OpenAIAssistantError extends Error {
     }
 }
 
-const createOpenAIAssistant = async (tools: Tool[] = [], assistantConfig: OpenAIAssistantConfig = { maxRetries: 3, pollInterval: 1000, timeout: 60000 }) => {
+const createOpenAIAssistant = async (tools: Tool[] = [], assistant_id: string, assistantConfig: OpenAIAssistantConfig = { maxRetries: 3, pollInterval: 1000, timeout: 60000 }) => {
     const {
         maxRetries = 3,
         timeout = 60000,
@@ -40,7 +43,7 @@ const createOpenAIAssistant = async (tools: Tool[] = [], assistantConfig: OpenAI
         throw new OpenAIAssistantError('OpenAI API key is required');
     }
 
-    if (!config.openai?.assistant_id) {
+    if (!assistant_id) {
         throw new OpenAIAssistantError('OpenAI Assistant ID is required');
     }
 
@@ -53,7 +56,7 @@ const createOpenAIAssistant = async (tools: Tool[] = [], assistantConfig: OpenAI
 
     try {
         // Verificar que el assistant existe
-        assistant = await client.beta.assistants.retrieve(config.openai.assistant_id);
+        assistant = await client.beta.assistants.retrieve(assistant_id);
     } catch (error) {
         throw new OpenAIAssistantError(`Failed to retrieve assistant: ${error}`);
     }
@@ -395,5 +398,82 @@ async function processFileMessage(attachmentUrl: string, fileName: string): Prom
     }
 }
 
+async function agenteBase(prompt: string, text: string, model: OpenAIModel = "gpt-4o-mini", temperature: number = 0, max_tokens: number = 1000) {
+    const openai = new OpenAI({ apiKey: config.openai.key });
+
+    try {
+        const response = await openai.chat.completions.create({
+            model,
+            messages: [
+                {
+                    role: "system",
+                    content: prompt
+                },
+                {
+                    role: "user",
+                    content: text
+                }
+            ],
+            max_tokens,
+            temperature,
+        });
+
+        return response.choices[0].message.content || "No se pudo procesar el texto";
+    } catch (error) {
+        console.error('Error en agenteBase:', error);
+        throw new Error('Failed to process text with agenteBase');
+    }
+}
+
+
+async function agenteStructure(prompt, text, jsonExample, model: OpenAIModel = "gpt-4o-mini", temperature: number = 0) {
+    const openai = new OpenAI({ apiKey: config.openai.key });
+
+    const systemPrompt = `${prompt}
+
+Debes responder ÚNICAMENTE en formato JSON válido siguiendo esta estructura exacta:
+${JSON.stringify(jsonExample, null, 2)}
+
+Importante: Tu respuesta debe ser un JSON válido que pueda ser parseado directamente.`;
+
+    try {
+        const response = await openai.chat.completions.create({
+            model,
+            messages: [
+                {
+                    role: "system",
+                    content: systemPrompt
+                },
+                {
+                    role: "user",
+                    content: text
+                }
+            ],
+            max_tokens: 1000,
+            response_format: { type: "json_object" },
+            temperature,
+        });
+
+        const content = response.choices[0].message.content;
+
+        if (!content) {
+            throw new Error("No se recibió contenido en la respuesta");
+        }
+
+        try {
+            return JSON.parse(content);
+        } catch (parseError) {
+            console.error('Error parsing JSON response:', parseError);
+            console.error('Raw content:', content);
+            throw new Error('Failed to parse JSON response');
+        }
+    } catch (error) {
+        console.error('Error en agenteStructure:', error);
+        throw new Error('Failed to process text with agenteStructure');
+    }
+}
+
+
+
 export default createOpenAIAssistant;
-export { OpenAIAssistantError, type Tool, type AssistantResponse, type OpenAIAssistantConfig, processFileMessage, processPictureMessage, processVoiceMessage };
+export { OpenAIAssistantError, agenteBase, agenteStructure, type Tool, type AssistantResponse, type OpenAIAssistantConfig, processFileMessage, processPictureMessage, processVoiceMessage };

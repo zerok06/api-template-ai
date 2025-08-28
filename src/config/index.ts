@@ -20,5 +20,11 @@ export const config = {
     },
     server: {
         timezone: process.env.SERVER_TIMEZONE || 'UTC'
+    },
+    mysql: {
+        host: process.env.MYSQL_HOST || 'localhost',
+        user: process.env.MYSQL_USER || 'root',
+        password: process.env.MYSQL_PASSWORD || 'senha',
+        database: process.env.MYSQL_DATABASE || 'mysql'
     }
 }
